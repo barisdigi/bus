@@ -10,6 +10,8 @@ import (
 	"regexp"
 	"sync"
 	"time"
+
+	"github.com/alitto/pond/v2"
 )
 
 type (
@@ -19,6 +21,7 @@ type (
 		idgen    Next
 		topics   map[string][]Handler
 		handlers map[string]Handler
+		pool     pond.Pool
 	}
 
 	// Next is a sequential unique id generator func type
@@ -70,15 +73,19 @@ const (
 )
 
 // NewBus inits a new bus
-func NewBus(g IDGenerator) (*Bus, error) {
+func NewBus(g IDGenerator, asyncHandlerPoolSize ...int) (*Bus, error) {
 	if g == nil {
 		return nil, fmt.Errorf("bus: Next() id generator func can't be nil")
 	}
-
+	if len(asyncHandlerPoolSize) == 0 {
+		asyncHandlerPoolSize = append(asyncHandlerPoolSize, 1)
+	}
+	pool := pond.NewPool(asyncHandlerPoolSize[0])
 	return &Bus{
 		idgen:    g.Generate,
 		topics:   make(map[string][]Handler),
 		handlers: make(map[string]Handler),
+		pool:     pool,
 	}, nil
 }
 
@@ -145,6 +152,41 @@ func (b *Bus) Emit(ctx context.Context, topic string, data interface{}) error {
 		h.Handle(ctx, e)
 	}
 
+	return nil
+}
+
+// Emit inits a new event and delivers to the interested in handlers, uses a goroutine for each handler
+func (b *Bus) EmitAsync(ctx context.Context, topic string, data interface{}) error {
+	b.mutex.RLock()
+	handlers, ok := b.topics[topic]
+	b.mutex.RUnlock()
+
+	if !ok {
+		return fmt.Errorf("bus: topic(%s) not found", topic)
+	}
+
+	source, _ := ctx.Value(CtxKeySource).(string)
+	txID, _ := ctx.Value(CtxKeyTxID).(string)
+	if txID == empty {
+		txID = b.idgen()
+		ctx = context.WithValue(ctx, CtxKeyTxID, txID)
+	}
+
+	e := Event{
+		ID:         b.idgen(),
+		Topic:      topic,
+		Data:       data,
+		OccurredAt: time.Now(),
+		TxID:       txID,
+		Source:     source,
+	}
+	group := b.pool.NewGroup()
+	for _, h := range handlers {
+		b.pool.Submit(func() {
+			h.Handle(ctx, e)
+		})
+	}
+	group.Wait()
 	return nil
 }
 

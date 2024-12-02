@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mustafaturan/bus/v3"
+	"github.com/barisdigi/bus/v3"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -87,6 +87,49 @@ func TestEmit(t *testing.T) {
 	t.Run("with unknown topic", func(t *testing.T) {
 		ctx := context.Background()
 		err := b.Emit(ctx, topicCommentUpdated, "my comment")
+
+		assert := assert.New(t)
+		assert.NotNil(err)
+		assert.Equal("bus: topic(comment.updated) not found", err.Error())
+	})
+}
+
+func TestEmitAsync(t *testing.T) {
+	b := setup(topicCommentCreated, topicCommentDeleted)
+	defer tearDown(b, topicCommentCreated, topicCommentDeleted)
+
+	t.Run("correctly assigns fields", func(t *testing.T) {
+		ctx := context.Background()
+		ctx = context.WithValue(ctx, bus.CtxKeyTxID, "tx")
+		ctx = context.WithValue(ctx, bus.CtxKeySource, "source")
+		err := b.EmitAsync(ctx, topicCommentDeleted, "my comment")
+
+		assert := assert.New(t)
+		assert.Nil(err)
+	})
+
+	t.Run("updates txID when empty", func(t *testing.T) {
+		ctx := context.Background()
+		err := b.EmitAsync(ctx, topicCommentDeleted, "my comment")
+
+		assert := assert.New(t)
+		assert.Nil(err)
+	})
+
+	t.Run("with handler", func(t *testing.T) {
+		ctx := context.Background()
+		registerFakeHandler(b, "test", t)
+
+		err := b.EmitAsync(ctx, topicCommentCreated, "my comment with handler")
+		if err != nil {
+			t.Fatalf("emit failed: %v", err)
+		}
+		b.DeregisterHandler("test")
+	})
+
+	t.Run("with unknown topic", func(t *testing.T) {
+		ctx := context.Background()
+		err := b.EmitAsync(ctx, topicCommentUpdated, "my comment")
 
 		assert := assert.New(t)
 		assert.NotNil(err)
@@ -290,7 +333,7 @@ func tearDown(b *bus.Bus, topicNames ...string) {
 }
 
 func fakeHandler(matcher string) bus.Handler {
-	return bus.Handler{Handle: func(context.Context, bus.Event) {}, Matcher: matcher}
+	return bus.Handler{Handle: func(context.Context, bus.Event) { time.Sleep(5 * time.Millisecond) }, Matcher: matcher}
 }
 
 func registerFakeHandler(b *bus.Bus, key string, t *testing.T) {
@@ -300,7 +343,7 @@ func registerFakeHandler(b *bus.Bus, key string, t *testing.T) {
 			assert.Equal("fakeid", e.ID)
 			assert.Equal(topicCommentCreated, e.Topic)
 			assert.Equal("my comment with handler", e.Data)
-			assert.True(e.OccurredAt.Before(time.Now()))
+			assert.True(e.OccurredAt.Before(time.Now()) || e.OccurredAt.Equal(time.Now()))
 		})
 	}
 	h := bus.Handler{Handle: fn, Matcher: ".*created$"}

@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mustafaturan/bus/v3"
+	"github.com/barisdigi/bus/v3"
 )
 
 func BenchmarkEmit(b *testing.B) {
@@ -32,6 +32,28 @@ func BenchmarkEmit(b *testing.B) {
 	ctx = context.WithValue(ctx, bus.CtxKeySource, source)
 	for n := 0; n < b.N; n++ {
 		_ = ebus.Emit(ctx, topic, n)
+	}
+}
+
+func BenchmarkEmitAsync(b *testing.B) {
+	b.ReportAllocs()
+
+	const (
+		txID       = "BENCHMARK"
+		topic      = "order.created"
+		handlerKey = "test.bench.handler"
+		source     = "source"
+	)
+
+	ebus := setup(topic)
+	defer tearDown(ebus, topic)
+	h := fakeHandler(topic)
+	ebus.RegisterHandler(handlerKey, h)
+
+	ctx := context.WithValue(context.Background(), bus.CtxKeyTxID, txID)
+	ctx = context.WithValue(ctx, bus.CtxKeySource, source)
+	for n := 0; n < b.N; n++ {
+		_ = ebus.EmitAsync(ctx, topic, n)
 	}
 }
 
