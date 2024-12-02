@@ -1,4 +1,4 @@
-module github.com/mustafaturan/bus/v3
+module github.com/barisdigi/bus/v3
 
 go 1.16
 
