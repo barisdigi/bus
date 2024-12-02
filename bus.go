@@ -182,7 +182,7 @@ func (b *Bus) EmitAsync(ctx context.Context, topic string, data interface{}) err
 	}
 	group := b.pool.NewGroup()
 	for _, h := range handlers {
-		b.pool.Submit(func() {
+		group.Submit(func() {
 			h.Handle(ctx, e)
 		})
 	}
